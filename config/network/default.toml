@@ -1,6 +1,7 @@
 [network]
 
 [network.controller]
+peer_file_dump_interval = 5 # period in seconds to dump peer file.
 
 [network.controller.incoming]
 max_conn_count = 4

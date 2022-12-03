@@ -178,11 +178,7 @@ impl Peer {
         }
         self.state = PeerState::OutConnecting;
         log::trace!(
-            "Peer {} | is OutConnecting",
-            self.id.to_string().get(0..8).unwrap()
-        );
-        log::info!(
-            "Peer {} | trying to connect to {} (attempt {})",
+            "Peer {} | Trying to connect to {} (attempt {})",
             self.id.to_string().get(0..8).unwrap(),
             addr,
             attempt,

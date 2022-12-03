@@ -9,13 +9,15 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::fs;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{self, Duration};
-use uuid::Uuid;
+use uuid::Uuid; // for write_all()
 
 use super::command::Command;
 use super::event::Event;
@@ -294,7 +296,7 @@ impl NetworkController {
                                 config.peers.heartbeat_period,
                             );
                             let id = peer.id;
-                            log::info!(
+                            log::trace!(
                                 "Controller | Starting peer {}",
                                 id.to_string().get(0..8).unwrap()
                             );
@@ -352,8 +354,9 @@ impl NetworkController {
         let controller_addr = self.addr;
         let outgoing = self.outgoing.clone();
         let incoming = self.incoming.clone();
+        let interval = self.config.peer_file_dump_interval.try_into().unwrap();
         let handle = tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(5)); // Every second
+            let mut interval = time::interval(Duration::from_secs(interval)); // Every second
             loop {
                 // We wait for the periodic tick,
                 interval.tick().await;
@@ -381,6 +384,26 @@ impl NetworkController {
                         acc
                     })
                     .await;
+
+                let mut addrs = outgoing
+                    .iter()
+                    .map(|info| info.addr)
+                    .collect::<Vec<SocketAddr>>();
+                let mut in_addrs = incoming
+                    .iter()
+                    .map(|info| info.addr)
+                    .collect::<Vec<SocketAddr>>();
+
+                addrs.append(&mut in_addrs);
+
+                let addrs_str = serde_json::to_string_pretty(&addrs).unwrap();
+                let working_dir = get_working_dir();
+                let mut path = PathBuf::from(&working_dir);
+                path.push("peers.json");
+                let mut file = File::create(&path).await.expect("create peers.json");
+                file.write_all(addrs_str.as_bytes())
+                    .await
+                    .expect("write to peers.json");
 
                 let summary = Summary {
                     controller,
@@ -905,6 +928,8 @@ pub struct Controller {
     pub listen: Listen,
     /// target section
     pub target: Target,
+    /// Period, in seconds, for dumping peer file.
+    pub peer_file_dump_interval: i32,
 }
 
 /// Configuration for the network controller. Incoming section
