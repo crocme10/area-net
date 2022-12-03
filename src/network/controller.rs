@@ -248,6 +248,7 @@ impl NetworkController {
         let idle = self.idle.clone();
         let peers = self.peers.clone();
         let outgoing = self.outgoing.clone();
+        let incoming = self.incoming.clone();
         let config = self.config.clone();
         let handle = tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_secs(1)); // Every second
@@ -269,6 +270,7 @@ impl NetworkController {
                         let tx_evt = tx_evt.clone();
                         let peers = peers.clone();
                         let outgoing = outgoing.clone();
+                        let incoming = incoming.clone();
                         let config = config.clone();
                         let label = label.clone();
                         async move {
@@ -284,6 +286,20 @@ impl NetworkController {
                                     "Too many simultaneous connection attempts"
                                 );
                                 set.insert(addr_info.clone());
+                                return set;
+                            }
+
+                            // We need to make sure the address we want to connect to is not
+                            // already in the incoming or outgoing sets. If it is, then we remove
+                            // it from the next round.
+                            if outgoing.attempting.iter().any(|(_id, info)| info.addr == addr_info.addr) {
+                                return set;
+                            }
+                            if outgoing.connected.iter().any(|(_id, info)| info.addr == addr_info.addr) {
+                                return set;
+                            }
+                            let incoming = incoming.lock().await;
+                            if incoming.connected.iter().any(|(_id, info)| info.addr == addr_info.addr) {
                                 return set;
                             }
 
