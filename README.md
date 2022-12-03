@@ -106,6 +106,7 @@ expects to find a file in `profile/bob.json` containing an array of addresses se
 
 The project comes with 4 profiles for testing basic functionalities, bob, alice, carol, and dave.
 
+![Small Network](assets/small-network.svg)
 ## Contributing
 
 Coming Soon.
