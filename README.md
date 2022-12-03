@@ -2,14 +2,14 @@
 
 A Peer 2 Peer Network Controller.
 
-This is a CLI application to connect, and be connected, with remote peers.
+This is a command-line tool to connect, and be connected, with remote peers.
 The purpose of this network is just to explore network peers.
 
 
-## Getting Started
+## Getting started
 
 Follow these instructions to get a copy of the project up and running.
-This project is in development, and is intended for testing only.
+This project is in development phase, and is intended for testing only.
 
 ### Prerequisites
 
@@ -37,14 +37,14 @@ Explain how to run the automated tests for this system
 
 #### Configuration
 
-The application is configured using layers where we store key/value settings.
+The application is configured using layers where each layer stores key/value settings.
 Each setting in a layer overrides the corresponding setting in the layers below.
 There are 3 layers:
 
-- at the base level, we have the **default layer**.
-- then we have the **profile layer**, which can override some settings for a given profile.
-- finally we have the **command-line layer**, where the settings present in the command line
-  will override the corresponding one below.
+- at the base level, the **default layer** provides an exhaustive set of default values.
+- then the **profile layer** can override some settings for a given profile.
+- finally the **command-line layer** can override some settings present in the layers below.
+  The command-line has no persistence, so it is meant only for one-off situations.
 
 The command line is sparse, and contains essentially these three components:
 
@@ -52,9 +52,9 @@ The command line is sparse, and contains essentially these three components:
 area-net -c [CONFIG DIR] -p [PROFILE] -s [KEY1=VALUE] -s [KEY2=VALUE]
 ```
 
-* A **config directory**: This is required, and provides the application with
+* A **config directory**: this is required, and provides the application with
   default configuration values.
-* A **profile name**: This is optional, but most likely important to get the 
+* A **profile name**: this is optional, but most likely important to get the 
   correct behavior
 * Finally, individual configuration settings can be overriden with the command line.
 
@@ -76,24 +76,24 @@ following content:
 port = 8901
 ```
 
-and run the application with the command
+and run the application with the command:
 
 ```
 area-net -c config -p testing
 ```
 
 There is one additional configuration file, which contains the list of initial peers the node should connect to. This
-file is identified by a configuration setting, `config.network.target.path`, eg, in `config/network/bob.toml`:
+file is identified by a configuration setting, `config.network.target.path`, for example, in `config/network/bob.toml`:
 
 ```toml
 [...]
 
 [network.controller.target]
-path = "profile/bob.toml"
+path = "profile/bob.json"
 ```
 
 If the path is relative, it is relative to the current working directory, which is the root of the project. So the application
-expects to find a file in `profile/bob.toml` containing an array of addresses serialized in JSON format, eg:
+expects to find a file in `profile/bob.json` containing an array of addresses serialized in JSON format, eg:
 
 ```JSON
 [
@@ -105,11 +105,6 @@ expects to find a file in `profile/bob.toml` containing an array of addresses se
 #### Example
 
 The project comes with 4 profiles for testing basic functionalities, bob, alice, carol, and dave.
- ## Built With
-
-  - [Tokio](https://tokio.rs/) - This project relies mainly on Tokio for all I/O, async/await runtime, and tracing.
-  - [Clap](https://clap.rs/) - Used for command line operations.
-  - Serde, Chrono, ...
 
 ## Contributing
 
@@ -130,8 +125,4 @@ repository](https://github.com/crocme10/area-net/tags).
 This project is licensed under the [MIT License](LICENSE.md)
 
 ## Acknowledgments
-
-  - Hat tip to anyone whose code is used
-  - Inspiration
-  - etc
 
