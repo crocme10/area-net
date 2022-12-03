@@ -1,7 +1,7 @@
-label = "carol"
+label = "erin"
 
 [network.controller.listen]
-port = 8085
+port = 8105
 
 [network.controller.target]
-file = "profiles/carol.json"
+file = "profiles/erin.json"

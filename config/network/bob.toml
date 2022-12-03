@@ -1,7 +1,7 @@
 label = "bob"
 
 [network.controller.listen]
-port = 8085
+port = 8095
 
 [network.controller.target]
 file = "profiles/bob.json"
