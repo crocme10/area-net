@@ -630,9 +630,10 @@ impl Peer {
                 self.heartbeat_timeout_handle = Some(handle);
                 Ok(())
             }
-            (PeerState::OutAlive, Command::CancelHeartbeatTimeout { src: _ }) => {
+            (PeerState::OutAlive, Command::CancelHeartbeatTimeout { rtt }) => {
                 // We have received a request to remove a task that would
-                // trigger a timeout
+                // trigger a timeout, and we need to send the rtt to the
+                // controller so that he can update the connection status.
                 if let Some(handle) = &self.heartbeat_timeout_handle {
                     handle.abort();
                     self.heartbeat_timeout_handle = None;
@@ -641,6 +642,16 @@ impl Peer {
                         "Peer {} | Could not find handle for heartbeat timeout.",
                         self.id.to_string().get(0..8).unwrap()
                     );
+                }
+                let msg = Event::ConnectionUpdate { id: self.id, rtt };
+                if let Err(err) = self.tx_evt.send(msg).await {
+                    // We're in deep trouble here, we can't communicate with
+                    // the network controller. So we shutdown.
+                    return Err(Error::SendEvent {
+                        source: err,
+                        detail: "Peer {} | Could not send 'connection update' to controller | Receiver dropped."
+                        .to_owned(),
+                    });
                 }
                 Ok(())
             }
@@ -800,17 +811,15 @@ async fn handle_message(id: Uuid, msg: Message, tx: Sender<Command>) -> Result<(
             let dt = Utc::now();
             let ts = dt.timestamp_micros();
             let rtt = ts - heartbeat_response.src();
-            log::info!(
+            log::trace!(
                 "Peer {} | Received a 'heartbeat response' from {} | RTT {} μs",
                 id.to_string().get(0..8).unwrap(),
                 heartbeat_response.label(),
                 rtt
             );
-            tx.send(Command::CancelHeartbeatTimeout {
-                src: heartbeat_response.src(),
-            })
-            .await
-            .expect("Cannot send command to self");
+            tx.send(Command::CancelHeartbeatTimeout { rtt })
+                .await
+                .expect("Cannot send command to self");
         }
     }
     Ok(())

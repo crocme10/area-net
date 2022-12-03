@@ -54,9 +54,23 @@ pub struct IdleState {
     pub addrs: HashSet<AddrInfo>,
 }
 
+/// Data used to track outgoing connections
+/// It includes a round trip time.
+#[derive(Debug, Clone, Serialize)]
+pub struct OutConnInfo {
+    /// Address of the remote peer.
+    pub addr: SocketAddr,
+    /// Id of the remote peer
+    pub id: Uuid,
+    /// Label of the remote peer.
+    pub label: String,
+    /// Round trip time
+    pub rtt: i64,
+}
+
 /// Data used to track idle information:
 #[derive(Debug, Clone, Serialize)]
-pub struct ConnInfo {
+pub struct InConnInfo {
     /// Address of the remote peer.
     pub addr: SocketAddr,
     /// Id of the remote peer
@@ -71,14 +85,14 @@ pub struct OutgoingState {
     /// Current list of peer ids attempting to connect
     pub attempting: HashMap<Uuid, AddrInfo>,
     /// Current list of peers connected.
-    pub connected: HashMap<Uuid, ConnInfo>,
+    pub connected: HashMap<Uuid, OutConnInfo>,
 }
 
 /// Network Controller State for incoming connections.
 #[derive(Debug, Default)]
 pub struct IncomingState {
     /// Current list of peers connected.
-    pub connected: HashMap<Uuid, ConnInfo>,
+    pub connected: HashMap<Uuid, InConnInfo>,
 }
 
 /// PeerData contains information to communicate with the peer.
@@ -328,7 +342,8 @@ impl NetworkController {
         Ok(handle)
     }
 
-    /// Spawn a thread which monitors a set of addresses.
+    /// Spawn a thread which creates a summary of this network controller's
+    /// connections.
     /// Every second, each address present in this set will be sent a request
     /// to connect.
     async fn start_monitor_status(&self) -> Result<JoinHandle<()>, Error> {
@@ -343,7 +358,7 @@ impl NetworkController {
                 // We wait for the periodic tick,
                 interval.tick().await;
 
-                let controller = ConnInfo {
+                let controller = InConnInfo {
                     id: controller,
                     label: label.clone(),
                     addr: controller_addr,
@@ -493,10 +508,11 @@ impl NetworkController {
                         .expect("addr info for id");
                     outgoing_guard.connected.insert(
                         id,
-                        ConnInfo {
+                        OutConnInfo {
                             addr: peer_addr,
                             id: peer_id,
                             label: peer_label,
+                            rtt: i64::MAX,
                         },
                     );
                 }
@@ -510,12 +526,19 @@ impl NetworkController {
                     let mut incoming_guard = incoming.lock().await;
                     incoming_guard.connected.insert(
                         id,
-                        ConnInfo {
+                        InConnInfo {
                             addr: peer_addr,
                             id: peer_id,
                             label: peer_label,
                         },
                     );
+                }
+                Event::ConnectionUpdate { id, rtt } => {
+                    let mut outgoing_guard = outgoing.lock().await;
+                    outgoing_guard
+                        .connected
+                        .entry(id)
+                        .and_modify(|info| info.rtt = rtt);
                 }
                 Event::Disconnected { id, addr } => {
                     // We remove the id from the list of outgoing peers,
@@ -938,9 +961,9 @@ pub struct Target {
 #[derive(Debug, Clone, Serialize)]
 pub struct Summary {
     /// controller
-    pub controller: ConnInfo,
+    pub controller: InConnInfo,
     /// incoming
-    pub incoming: Vec<ConnInfo>,
+    pub incoming: Vec<InConnInfo>,
     /// outgoing
-    pub outgoing: Vec<ConnInfo>,
+    pub outgoing: Vec<OutConnInfo>,
 }

@@ -40,15 +40,20 @@ pub enum Command {
     HeartbeatRequest,
     /// Send a heartbeat response
     HeartbeatResponse {
-        /// Origin timestamp
+        /// To send the heartbeat response,
+        /// we need to provide the timestamp
+        /// that was given in the heartbeat
+        /// request.
         src: i64,
     },
     /// We missed a heartbeat
     HeartbeatTimeout,
-    /// Remove Heartbeat with given src key.
+    /// Peer has received a HeartbeatResponse
+    /// We need to remove the heartbeat timeout thread
+    /// We need to store the rtt
     CancelHeartbeatTimeout {
-        /// Origin timestamp
-        src: i64,
+        /// Round Trip Time in microseconds.
+        rtt: i64,
     },
     /// At anypoint we can ask the peer to terminate the connection with the remote peer.
     Disconnect,
@@ -77,7 +82,7 @@ impl ToString for Command {
             Command::HeartbeatResponse { src: _ } => "heartbeat response".to_owned(),
             Command::HeartbeatRequest => "heartbeat request".to_owned(),
             Command::HeartbeatTimeout => "heartbeat timeout".to_owned(),
-            Command::CancelHeartbeatTimeout { src: _ } => "cancel heartbeat timeout".to_owned(),
+            Command::CancelHeartbeatTimeout { rtt: _ } => "cancel heartbeat timeout".to_owned(),
             Command::Disconnect => "disconnect".to_owned(),
             Command::Terminate => "terminate".to_owned(),
         }

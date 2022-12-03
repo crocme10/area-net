@@ -76,6 +76,18 @@ pub enum Event {
         source: std::io::Error,
     },
 
+    /// The peer updates the controller about the health
+    /// of the connection
+    /// Currently only the out peer sends this update
+    /// so that the controller can in turn store the
+    /// new RTT
+    ConnectionUpdate {
+        /// id of the peer
+        id: Uuid,
+        /// address we tried to connect to
+        rtt: i64,
+    },
+
     /// The peer has successfully terminated.
     Terminated {
         /// id of the peer
