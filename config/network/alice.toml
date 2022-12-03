@@ -1,0 +1,7 @@
+label = "alice"
+
+[network.controller.listen]
+port = 8090
+
+[network.controller.target]
+path = "profiles/alice.json"

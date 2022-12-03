@@ -1,0 +1,25 @@
+[network]
+
+[network.controller]
+
+[network.controller.incoming]
+max_conn_count = 4
+max_simultaneous_conn_attempts = 4
+
+[network.controller.outgoing]
+max_simultaneous_conn_attempts = 4
+
+[network.controller.peers]
+max_conn_attempt = 4
+conn_attempt_delay = 1
+max_idle_count = 4
+max_banned_count = 4
+heartbeat_timeout = 10 # delay in second after which we declare the peer dead.
+heartbeat_period = 2
+
+[network.controller.listen]
+addr = "::1"
+port = 8083
+
+[network.controller.target]
+file = "profiles/default.json"

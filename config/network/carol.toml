@@ -1,0 +1,7 @@
+label = "carol"
+
+[network.controller.listen]
+port = 8085
+
+[network.controller.target]
+path = "profiles/carol.json"

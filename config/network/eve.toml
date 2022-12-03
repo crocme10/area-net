@@ -1,0 +1,8 @@
+[network.controller.listen]
+port = 8095
+
+[network.controller.target]
+outgoing_connections = [
+  "[::1]:8085",
+  "[::1]:8090"
+]
