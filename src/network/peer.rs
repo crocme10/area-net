@@ -18,7 +18,10 @@ use uuid::Uuid;
 use super::command::Command;
 use super::event::Event;
 use crate::decoder;
-use crate::msg::{self, ConnRequest, ConnResponse, HeartbeatRequest, HeartbeatResponse, Message};
+use crate::message::{
+    self, ConnRequest, ConnResponse, ContactRequest, ContactResponse, HeartbeatRequest,
+    HeartbeatResponse, Message,
+};
 use crate::Frame;
 use crate::FrameCodec;
 
@@ -491,9 +494,9 @@ impl Peer {
                 // TODO We need to check if we don't have too many connections,
                 self.state = PeerState::OutHandshaking;
                 let frame = Message::ConnRequest(ConnRequest::new(
-                    self.controller,
+                    self.controller.to_string(),
                     self.label.clone(),
-                    self.controller_addr,
+                    self.controller_addr.to_string(),
                 ))
                 .into_frame()
                 .map_err(|err| Error::Message { source: err })?;
@@ -516,10 +519,12 @@ impl Peer {
                 // so we send back a connection response. Then we cross fingers,
                 // because we're expecting the message to arrive, so we
                 // set the state to InAlive, and notify the controller.
-                let frame =
-                    Message::ConnResponse(ConnResponse::new(self.controller, self.label.clone()))
-                        .into_frame()
-                        .map_err(|err| Error::Message { source: err })?;
+                let frame = Message::ConnResponse(ConnResponse::new(
+                    self.controller.to_string(),
+                    self.label.clone(),
+                ))
+                .into_frame()
+                .map_err(|err| Error::Message { source: err })?;
                 self.sink
                     .as_mut()
                     .unwrap()
@@ -584,10 +589,12 @@ impl Peer {
                 // We have received a periodic tick, and need to send a heartbeat request
                 // We also store a handle to a detached thread that will trigger a timeout
                 // if we haven't received a response before a configurable duration.
-                let frame =
-                    Message::HeartbeatRequest(HeartbeatRequest::now(self.id, self.label.clone()))
-                        .into_frame()
-                        .map_err(|err| Error::Message { source: err })?;
+                let frame = Message::HeartbeatRequest(HeartbeatRequest::now(
+                    self.id.to_string(),
+                    self.label.clone(),
+                ))
+                .into_frame()
+                .map_err(|err| Error::Message { source: err })?;
                 self.sink
                     .as_mut()
                     .unwrap()
@@ -624,6 +631,28 @@ impl Peer {
                     old_handle.abort(); // TODO Not sure what the correct behavior should be.
                 }
                 self.heartbeat_timeout_handle = Some(handle);
+                Ok(())
+            }
+            (PeerState::OutAlive, Command::SendContactRequest) => {
+                let frame = Message::ContactRequest(ContactRequest)
+                    .into_frame()
+                    .map_err(|err| Error::Message { source: err })?;
+                self.sink
+                    .as_mut()
+                    .unwrap()
+                    .send(frame)
+                    .await
+                    .map_err(|err| {
+                        log::warn!(
+                            "Peer {} | Could not send 'contact request' to remote | {err}",
+                            self.id.to_string().get(0..8).unwrap()
+                        );
+                        Error::Codec { source: err }
+                    })?;
+                log::trace!(
+                    "Peer {} | Sent a 'contact request'",
+                    self.id.to_string().get(0..8).unwrap()
+                );
                 Ok(())
             }
             (PeerState::OutAlive, Command::CancelHeartbeatTimeout { rtt }) => {
@@ -675,7 +704,7 @@ impl Peer {
                 // asked to send a response back.
                 // We also store a handle to a thread
                 let frame = Message::HeartbeatResponse(HeartbeatResponse::now(
-                    self.controller,
+                    self.controller.to_string(),
                     self.label.clone(),
                     src,
                 ))
@@ -707,6 +736,62 @@ impl Peer {
                     old_handle.abort();
                 }
                 self.heartbeat_timeout_handle = Some(handle);
+                Ok(())
+            }
+            (PeerState::InAlive, Command::RequestContacts) => {
+                log::trace!(
+                    "Peer {} | Request contacts from controller.",
+                    self.id.to_string().get(0..8).unwrap()
+                );
+                let msg = Event::ContactRequested { id: self.id };
+                if let Err(err) = self.tx_evt.send(msg).await {
+                    // We're in deep trouble here, we can't communicate with
+                    // the network controller. So we shutdown.
+                    return Err(Error::SendEvent {
+                        source: err,
+                        detail: "Peer {} | Could not send 'contact requested' to controller | Receiver dropped."
+                        .to_owned(),
+                    });
+                }
+                Ok(())
+            }
+            (PeerState::InAlive, Command::SendContactResponse { addrs }) => {
+                log::trace!(
+                    "Peer {} | Sending contacts to remote.",
+                    self.id.to_string().get(0..8).unwrap()
+                );
+                let frame = Message::ContactResponse(ContactResponse::new(addrs))
+                    .into_frame()
+                    .map_err(|err| Error::Message { source: err })?;
+                self.sink
+                    .as_mut()
+                    .unwrap()
+                    .send(frame)
+                    .await
+                    .map_err(|err| {
+                        log::warn!(
+                            "Peer {} | Could not send 'contact response' to remote | {err}",
+                            self.id.to_string().get(0..8).unwrap()
+                        );
+                        Error::Codec { source: err }
+                    })?;
+                log::info!(
+                    "Peer {} | Sent a 'contact response'",
+                    self.id.to_string().get(0..8).unwrap()
+                );
+                Ok(())
+            }
+            (PeerState::OutAlive, Command::UpdateContacts { addrs }) => {
+                let msg = Event::ContactUpdated { id: self.id, addrs };
+                if let Err(err) = self.tx_evt.send(msg).await {
+                    // We're in deep trouble here, we can't communicate with
+                    // the network controller. So we shutdown.
+                    return Err(Error::SendEvent {
+                        source: err,
+                        detail: "Peer {} | Could not send 'contact updated' to controller | Receiver dropped."
+                        .to_owned(),
+                    });
+                }
                 Ok(())
             }
             (state, command) => {
@@ -817,6 +902,30 @@ async fn handle_message(id: Uuid, msg: Message, tx: Sender<Command>) -> Result<(
                 .await
                 .expect("Cannot send command to self");
         }
+        Message::ContactRequest(_) => {
+            log::info!(
+                "Peer {} | Received a 'contact request'",
+                id.to_string().get(0..8).unwrap()
+            );
+            tx.send(Command::RequestContacts)
+                .await
+                .expect("Cannot send command to self");
+        }
+        Message::ContactResponse(contact_response) => {
+            log::info!(
+                "Peer {} | Received a 'contact response'",
+                id.to_string().get(0..8).unwrap()
+            );
+            tx.send(Command::UpdateContacts {
+                addrs: contact_response
+                    .addrs()
+                    .iter()
+                    .map(|addr| SocketAddr::from_str(addr).unwrap())
+                    .collect(),
+            })
+            .await
+            .expect("Cannot send command to self");
+        }
     }
     Ok(())
 }
@@ -849,7 +958,7 @@ pub enum Error {
     /// Message Error
     Message {
         /// Just the source
-        source: msg::Error,
+        source: message::Error,
     },
 
     /// Thread Error

@@ -149,6 +149,8 @@ pub struct NetworkController {
     pub monitor_idle_handle: Option<JoinHandle<()>>,
     /// Thread Handle for the monitor status thread.
     pub monitor_status_handle: Option<JoinHandle<()>>,
+    /// Thread Handle for the network discovery thread.
+    pub network_discovery_handle: Option<JoinHandle<()>>,
 }
 
 impl NetworkController {
@@ -177,6 +179,7 @@ impl NetworkController {
             listen_handle: None,
             monitor_idle_handle: None,
             monitor_status_handle: None,
+            network_discovery_handle: None,
         })
     }
 
@@ -419,24 +422,55 @@ impl NetworkController {
         Ok(handle)
     }
 
+    /// Spawn a thread which broadcast a 'SendContactRequest' command to all
+    /// the outgoing peers.
+    async fn start_network_discovery(&self) -> Result<JoinHandle<()>, Error> {
+        let outgoing = self.outgoing.clone();
+        let peers = self.peers.clone();
+        let interval = self.config.peer_file_dump_interval.try_into().unwrap();
+        let handle = tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_secs(interval)); // Every second
+            loop {
+                // We wait for the periodic tick,
+                interval.tick().await;
+
+                let outgoing = outgoing.lock().await;
+
+                // FIXME Could we do without that ugly clone?
+                futures::stream::iter(outgoing.connected.clone()).for_each(|(id, _)| {
+                    let peers = peers.clone();
+                    async move {
+                        let peers = peers.lock().await;
+                        let peer_data = peers.get(&id).unwrap();
+                        if let Err(err) =
+                            send_command_single_peer(Command::SendContactRequest, &peer_data.tx, &id)
+                            .await
+                            {
+                                log::error!(
+                                    "Controller | Could not send 'contact request' to peer {} | {err}",
+                                    id.to_string().get(0..8).unwrap());
+                            }
+                    }
+                })
+                .await;
+            }
+        });
+        Ok(handle)
+    }
+
     /// The main network controller loop:
     /// We spawn a thread to listen to incoming tcp connection,
     /// We send a connect to all initial peers to connect to their remote,
     /// and then we just listen to incoming events.
     pub async fn run(&mut self) -> Result<(), Error> {
-        // let tx_evt = self.tx_evt.clone();
-        // let addr = self.addr;
-        // let peers = self.peers.clone();
-        // let incoming = self.incoming.clone();
-        // let config = self.config.clone();
-        // let handle =
-        //     tokio::spawn(async move { serve(addr, tx_evt, peers, incoming, config).await });
         let handle = self.start_listen().await?;
         self.listen_handle = Some(handle);
         let handle = self.start_monitor_idle().await?;
         self.monitor_idle_handle = Some(handle);
         let handle = self.start_monitor_status().await?;
         self.monitor_status_handle = Some(handle);
+        let handle = self.start_network_discovery().await?;
+        self.network_discovery_handle = Some(handle);
 
         let peers = self.peers.clone();
         let outgoing = self.outgoing.clone();
@@ -611,6 +645,83 @@ impl NetworkController {
                         .remove(&id)
                         .expect("addr_info for id");
                     idle.lock().await.addrs.insert(addr_info);
+                }
+                Event::ContactRequested { id } => {
+                    log::trace!(
+                        "Controller | Peer {} requested contacts.",
+                        id.to_string().get(0..8).unwrap()
+                    );
+                    // Build the contacts from the incoming and outgoing sets.
+                    let incoming_guard = incoming.lock().await;
+
+                    let incoming = futures::stream::iter(&incoming_guard.connected)
+                        .fold(Vec::new(), |mut acc, (_, info)| async move {
+                            acc.push(info.clone());
+                            acc
+                        })
+                        .await;
+
+                    let outgoing_guard = outgoing.lock().await;
+
+                    let outgoing = futures::stream::iter(&outgoing_guard.connected)
+                        .fold(Vec::new(), |mut acc, (_, info)| async move {
+                            acc.push(info.clone());
+                            acc
+                        })
+                        .await;
+                    let mut addrs = outgoing
+                        .iter()
+                        .map(|info| info.addr)
+                        .collect::<Vec<SocketAddr>>();
+                    let mut in_addrs = incoming
+                        .iter()
+                        .map(|info| info.addr)
+                        .collect::<Vec<SocketAddr>>();
+
+                    addrs.append(&mut in_addrs);
+                    match peers.lock().await.get(&id).ok_or(Error::UnknownId {
+                        id,
+                        detail: "Controller | Could not find id in peer table.".to_owned(),
+                    }) {
+                        Err(err) => {
+                            log::error!("{err}");
+                        }
+                        Ok(peer_data) => {
+                            if let Err(err) = send_command_single_peer(
+                                Command::SendContactResponse { addrs },
+                                &peer_data.tx,
+                                &id,
+                            )
+                            .await
+                            {
+                                log::error!(
+                            "Controller | Could not send 'connection request' to peer {} | {err}",
+                            id.to_string().get(0..8).unwrap()
+                        );
+                            }
+                        }
+                    }
+                }
+                Event::ContactUpdated { id, mut addrs } => {
+                    log::trace!(
+                        "Controller | Peer {} provided a new list of contacts: {addrs:?}",
+                        id.to_string().get(0..8).unwrap()
+                    );
+                    if let Some(pos) = addrs.iter().position(|addr| *addr == self.addr) {
+                        addrs.remove(pos);
+                        let mut idle_guard = idle.lock().await;
+                        addrs
+                            .into_iter()
+                            .map(|addr| AddrInfo {
+                                addr,
+                                attempt: Arc::new(Mutex::new(0)),
+                            })
+                            .for_each(|info| {
+                                idle_guard.addrs.insert(info);
+                            });
+                    }
+                    // Need to remove ourselves from the list of addresses, and
+                    // then store them in idle.
                 }
             }
         }

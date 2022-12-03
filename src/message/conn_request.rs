@@ -20,12 +20,8 @@ pub struct ConnRequest {
 
 impl ConnRequest {
     /// Creates a new message
-    pub fn new(id: impl ToString, label: String, address: impl ToString) -> ConnRequest {
-        ConnRequest {
-            id: id.to_string(),
-            label,
-            address: address.to_string(),
-        }
+    pub fn new(id: String, label: String, address: String) -> ConnRequest {
+        ConnRequest { id, label, address }
     }
 
     /// Accessor for the key

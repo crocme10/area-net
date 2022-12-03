@@ -66,6 +66,16 @@ impl Parse {
         }
     }
 
+    /// Return the unsigned contained in the Frame::Integer
+    pub fn next_unsigned(&mut self) -> Result<u64, Error> {
+        match self.next_frame()? {
+            Frame::Integer(u) => Ok(u),
+            frame => Err(Error::InvalidFrameType {
+                detail: format!("Expected Integer Frame, got {frame:?}"),
+            }),
+        }
+    }
+
     /// Return Ok(()) if there is no more frames
     pub fn finish(&mut self) -> Result<(), Error> {
         if self.parts.next().is_none() {

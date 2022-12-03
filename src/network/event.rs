@@ -88,6 +88,24 @@ pub enum Event {
         rtt: i64,
     },
 
+    /// The peer has received a request to forward
+    /// the controller's contacts. So the peer
+    /// makes a request to the controller
+    ContactRequested {
+        /// id of the peer
+        id: Uuid,
+    },
+
+    /// The peer has received a list of contacts,
+    /// and need to inform the controller about
+    /// it.
+    ContactUpdated {
+        /// id of the peer
+        id: Uuid,
+        /// list of addresses.
+        addrs: Vec<SocketAddr>,
+    },
+
     /// The peer has successfully terminated.
     Terminated {
         /// id of the peer

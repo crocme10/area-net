@@ -15,11 +15,8 @@ pub struct ConnResponse {
 
 impl ConnResponse {
     /// Creates a new message
-    pub fn new(id: impl ToString, label: String) -> ConnResponse {
-        ConnResponse {
-            id: id.to_string(),
-            label,
-        }
+    pub fn new(id: String, label: String) -> ConnResponse {
+        ConnResponse { id, label }
     }
 
     /// Accessor for the key

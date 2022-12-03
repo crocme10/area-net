@@ -55,6 +55,20 @@ pub enum Command {
         /// Round Trip Time in microseconds.
         rtt: i64,
     },
+    /// Request the peer to send a ContactRequest to its remote.
+    SendContactRequest,
+    /// Request the peer to ask the controller for contacts.
+    RequestContacts,
+    /// Request the peer to send a ContactResponse to its remote
+    SendContactResponse {
+        /// list of addresses to send to the remote
+        addrs: Vec<SocketAddr>,
+    },
+    /// Request the peer to senda ContactUpdated to the controller
+    UpdateContacts {
+        /// list of addresses to send to the controller
+        addrs: Vec<SocketAddr>,
+    },
     /// At anypoint we can ask the peer to terminate the connection with the remote peer.
     Disconnect,
     /// Ask the peer to terminate itself.
@@ -83,6 +97,10 @@ impl ToString for Command {
             Command::HeartbeatRequest => "heartbeat request".to_owned(),
             Command::HeartbeatTimeout => "heartbeat timeout".to_owned(),
             Command::CancelHeartbeatTimeout { rtt: _ } => "cancel heartbeat timeout".to_owned(),
+            Command::SendContactRequest => "contact request".to_owned(),
+            Command::SendContactResponse { addrs: _ } => "contact response".to_owned(),
+            Command::RequestContacts => "request contacts".to_owned(),
+            Command::UpdateContacts { addrs: _ } => "update contacts".to_owned(),
             Command::Disconnect => "disconnect".to_owned(),
             Command::Terminate => "terminate".to_owned(),
         }

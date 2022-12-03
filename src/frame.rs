@@ -91,6 +91,19 @@ impl Frame {
         }
     }
 
+    /// push integer
+    pub(crate) fn push_unsigned(&mut self, u: u64) -> Result<(), Error> {
+        match self {
+            Frame::Array(vec) => {
+                vec.push(Frame::Integer(u));
+                Ok(())
+            }
+            _ => Err(Error::InvalidFrameType {
+                detail: String::from("Expected Frame Type Array"),
+            }),
+        }
+    }
+
     /// Checks if an entire message can be decoded from `src`
     pub fn check(src: &mut Cursor<&[u8]>) -> Result<(), Error> {
         // We already checked src.has_remaining(), so the get_u8() won't panic.

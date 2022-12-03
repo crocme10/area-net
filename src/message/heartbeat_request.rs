@@ -21,10 +21,10 @@ pub struct HeartbeatRequest {
 
 impl HeartbeatRequest {
     /// Creates a new message
-    pub fn now(id: impl ToString, label: String) -> HeartbeatRequest {
+    pub fn now(id: String, label: String) -> HeartbeatRequest {
         let dt = Utc::now();
         HeartbeatRequest {
-            id: id.to_string(),
+            id,
             label,
             src: dt.timestamp_micros(),
         }
