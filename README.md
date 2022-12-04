@@ -1,14 +1,34 @@
 # AreaNet
 
-A Peer 2 Peer Network Controller.
+A peer-to-peer network controller.
 
 This is a command-line tool to connect, and be connected, with remote peers.
-The purpose of this network is just to explore network peers.
+The purpose of this network is just to explore peer-to-peer networks, with two immediate goals:
 
+1. **Connectivity**: This means try to maintain connections, try to reconnect when the connection
+  goes down, try to automatically connect to other nodes
+2. **Awareness**: Try to make every node of the network avare of every other nodes.
+
+## Table of Contents
+
+1. [Getting Started](#getting-started)
+    1. [Prerequisites](#prerequisites)
+    2. [Installing](#installing)
+    3. [Running the tests](#running-the-tests)
+    4. [Running the example](#running-the-example)
+2. [Usage](#usage)
+    1. [Configuration](#configuration)
+3. [Documentation](#documentation)
+4. [Development](#development)
+    1. [Contributing](#contributing)
+    2. [Versioning](#versioning)
+    3. [Authors](#authors)
+5. [License](#license)
+6. [Acknowledgments](#acknowledgments)
 
 ## Getting started
 
-Follow these instructions to get a copy of the project up and running.
+Please follow these instructions to get a copy of the project up and running.
 This project is in development phase, and is intended for testing only.
 
 ### Prerequisites
@@ -27,15 +47,39 @@ cargo build --release
 ./target/release/area-net -h
 ```
 
+### Running the tests
 
-## Running the tests
+Use `cargo test` to run unit tests.
 
-Explain how to run the automated tests for this system
+### Running the example
 
-### Usage
+The project comes with 4 profiles for testing basic functionalities, bob, alice, carol, and dave.
 
+![Small Network](assets/small-network.svg)
 
-#### Configuration
+You can see each profile's configuration in 'config/network/[PROFILE].toml'. These profiles essentially
+specify the unique port of each profile, as seen in the diagram above. The profile also links to the
+list of initial addresses each profile should connect to. These are found in 'profiles/[PROFILE].json',
+and they contain an array, in JSON format, of network addresses (IPv6). Again, this is shown in the
+diagram above, as directed edges between each profile.
+
+To start this example, install the project following the instructions above, and open four terminal
+windowns. In each of those windows, type:
+
+```
+./area-net -c ./config -p [PROFILE]
+```
+
+where profile is in {bob, alice, carol, dave}.
+
+Then each window will display the logs, showing what each profile is doing, as seen in the following
+screenshot:
+
+![Screenshot](/assets/screenshot.png)
+
+## Usage
+
+### Configuration
 
 The application is configured using layers where each layer stores key/value settings.
 Each setting in a layer overrides the corresponding setting in the layers below.
@@ -102,22 +146,23 @@ expects to find a file in `profile/bob.json` containing an array of addresses se
 ]
 ```
 
-#### Example
+## Documentation
 
-The project comes with 4 profiles for testing basic functionalities, bob, alice, carol, and dave.
+Read more about the design of this project [here](/documentation/README.md)
 
-![Small Network](assets/small-network.svg)
-## Contributing
+## Development
+
+### Contributing
 
 Coming Soon.
 
-## Versioning
+### Versioning
 
 We use [Semantic Versioning](http://semver.org/) for versioning. For the versions
 available, see the [tags on this
 repository](https://github.com/crocme10/area-net/tags).
 
-## Authors
+### Authors
 
   - **Matthieu Paindavoine** [crocme10](https://github.com/crocme10)
 
@@ -126,4 +171,3 @@ repository](https://github.com/crocme10/area-net/tags).
 This project is licensed under the [MIT License](LICENSE.md)
 
 ## Acknowledgments
-

@@ -232,14 +232,20 @@ impl NetworkController {
         let incoming = self.incoming.clone();
         let config = self.config.clone();
         let handle = tokio::spawn(async move {
-            serve(controller, label, addr, tx_evt, peers, incoming, config).await
+            listen(controller, label, addr, tx_evt, peers, incoming, config).await
         });
         Ok(handle)
     }
 
-    /// Spawn a thread which monitors a set of addresses.
-    /// Every second, each address present in this set will be sent a request
-    /// to connect.
+    /// Spawn a thread which monitors a set of idle addresses.
+    /// Every second, we will try to connect to each of those address.
+    /// To do that, first we check to see if we should really connect to it:
+    /// - Could it be an address we are already connected to? Could it
+    ///   be our own 'listen' address?. If we should not connect to it, we drop it.
+    /// - If we should connect to it, we create a peer, and start its mainloop.
+    /// - Then we send a 'connect(addr)' command to that peer.
+    /// - The peer will respond after a while with a Connected Event, or a
+    ///   ConnectionRefused.
     async fn start_monitor_idle(&self) -> Result<JoinHandle<()>, Error> {
         let controller = self.id;
         let label = self.label.clone();
@@ -293,13 +299,16 @@ impl NetworkController {
                             // already in the incoming or outgoing sets. If it is, then we remove
                             // it from the next round.
                             if outgoing.attempting.iter().any(|(_id, info)| info.addr == addr_info.addr) {
+                                log::info!(r"Controller | /!\ Removing {} from idle | Outgoing Attempting", addr_info.addr);
                                 return set;
                             }
                             if outgoing.connected.iter().any(|(_id, info)| info.addr == addr_info.addr) {
+                                log::info!(r"Controller | /!\ Removing {} from idle. | Outgoing Connected", addr_info.addr);
                                 return set;
                             }
                             let incoming = incoming.lock().await;
                             if incoming.connected.iter().any(|(_id, info)| info.addr == addr_info.addr) {
+                                log::info!(r"Controller | /!\ Removing {} from idle. | Incoming Connected", addr_info.addr);
                                 return set;
                             }
 
@@ -374,6 +383,7 @@ impl NetworkController {
         let outgoing = self.outgoing.clone();
         let incoming = self.incoming.clone();
         let interval = self.config.peer_file_dump_interval.try_into().unwrap();
+        let d2 = self.config.d2_file.clone();
         let handle = tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_secs(interval)); // Every second
             loop {
@@ -424,15 +434,20 @@ impl NetworkController {
                     .await
                     .expect("write to peers.json");
 
-                let summary = Summary {
-                    controller,
-                    incoming,
-                    outgoing,
-                };
+                if let Some(ref file) = d2 {
+                    let summary = Summary {
+                        controller,
+                        incoming,
+                        outgoing,
+                    };
 
-                let output = serde_json::to_string(&summary).unwrap();
+                    let output = serde_json::to_string(&summary).unwrap();
 
-                log::info!("Status: {output}");
+                    let mut path = PathBuf::from(&working_dir);
+                    path.push(file);
+                    let mut file = File::create(&path).await.expect("create d2 file");
+                    file.write_all(output.as_bytes()).await.expect("write d2");
+                }
             }
         });
         Ok(handle)
@@ -851,7 +866,7 @@ async fn send_listen(
 /// addr is the address we're listening on
 /// tx is the channel through which we'll be sending network event back to
 /// the controller's main loop.
-async fn serve(
+async fn listen(
     controller: Uuid,
     label: String,
     addr: SocketAddr,
@@ -1057,6 +1072,8 @@ pub struct Controller {
     pub target: Target,
     /// Period, in seconds, for dumping peer file.
     pub peer_file_dump_interval: i32,
+    /// d2 output file
+    pub d2_file: Option<String>,
 }
 
 /// Configuration for the network controller. Incoming section
