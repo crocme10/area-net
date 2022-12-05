@@ -9,7 +9,7 @@ license = "LICENSE.md"
 name = "area-net"
 readme = "README.md"
 repository = "https://github.com/crocme10/area-net.git"
-version = "0.0.2"
+version = "0.0.3"
 
 [dependencies]
 async-recursion = "^1.0.0"
