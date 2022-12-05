@@ -18,6 +18,7 @@ The purpose of this network is just to explore peer-to-peer networks, with two i
     4. [Running the example](#running-the-example)
 2. [Usage](#usage)
     1. [Configuration](#configuration)
+    2. [Visualization](#visualization)
 3. [Documentation](#documentation)
 4. [Development](#development)
     1. [Contributing](#contributing)
@@ -35,6 +36,7 @@ This project is in development phase, and is intended for testing only.
 
 This is a rust project, so you'll need to install it:
 - [Getting Started with Rust](https://www.rust-lang.org/learn/get-started)
+- Optional, for visualization, Terrastruct's [d2](https://github.com/terrastruct/d2)
 
 ### Installing
 
@@ -53,7 +55,7 @@ Use `cargo test` to run unit tests.
 
 ### Running the example
 
-The project comes with 4 profiles for testing basic functionalities, bob, alice, carol, and dave.
+The project comes with 5 profiles for testing basic functionalities, bob, alice, carol, dave, and erin.
 
 ![Small Network](assets/small-network.svg)
 
@@ -63,9 +65,38 @@ list of initial addresses each profile should connect to. These are found in 'pr
 and they contain an array, in JSON format, of network addresses (IPv6). Again, this is shown in the
 diagram above, as directed edges between each profile.
 
-To start this example, install the project following the instructions above, and open four terminal
-windowns. In each of those windows, type:
+You can start all these profiles by hand, or use the script `start.sh`.
 
+#### Script
+
+1. Start one controller for each profile, with bob having the option to visualize the network.
+2. Wait for a keypress to terminate one or all of these processes: Use the first letter of the profile's
+   name to terminate that process, or q to terminate them all.
+
+If you want to [visualize](#visualization) the network as it evolves (from bob's perspective), you need to:
+
+1. Make sure [d2](https://github.com/terrastruct/d2) is installed.
+2. Remove previously existing files:
+    ```
+    rm profiles/bob/peers.d2
+    rm profiles/bob/peers.svg
+    touch profiles/bob/peers.d2
+    ```
+3. Start d2's watch on the peers.d2 file:
+    ```
+    d2 --watch profiles/bob/peers.d2
+    ```
+    At that point it should open a webpage in your default browser, with a blank page because the
+    network is empty.
+4. Start all the profiles
+    ```
+    ./start.sh
+    ```
+5. Observe in your browser how the network evolves as you terminate nodes with the script.
+
+#### Manual
+
+If you start each controller manually
 ```
 ./area-net -c ./config -p [PROFILE]
 ```
@@ -145,6 +176,22 @@ expects to find a file in `profile/bob.json` containing an array of addresses se
     "[::1]:8095"
 ]
 ```
+### Visualization
+
+One of the goal of the project is to become aware of the network. Since it is dynamic in nature, the application
+offers a tool to have a real-time visualization of the network. It is currently very limited in functionality.
+
+The visualization works by dumping, along the `peers.json`, a `peers.d2` file. This file is watched by the 
+`d2 --watch` command line, which publishes a rendered svg image on a web page.
+
+This feature is accessible for a profile using either the configuration file, or the command-line:
+
+```
+./target/release/area-net -c ./config -p bob -s '"network.controller.d2" = true'
+```
+
+This diagram displays each node, with its label and port.
+It also shows connections, with their round trip time in microseconds.
 
 ## Documentation
 

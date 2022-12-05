@@ -4,4 +4,4 @@ label = "bob"
 port = 8095
 
 [network.controller.target]
-file = "profiles/bob.json"
+file = "profiles/bob/bob.json"

@@ -3,12 +3,14 @@ use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::fmt::Write as FmtWrite;
 use std::hash::Hash;
+use std::io::Write as IoWrite;
 use std::net::{AddrParseError, IpAddr, SocketAddr};
+use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::fs;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
@@ -17,6 +19,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{self, Duration};
+use tokio::{fs, task};
 use uuid::Uuid; // for write_all()
 
 use super::command::Command;
@@ -373,7 +376,9 @@ impl NetworkController {
     }
 
     /// Spawn a thread which creates a summary of this network controller's
-    /// connections.
+    /// connections. This summary will be stored in the same directory as
+    /// the initial target connections with the name peers.json
+    /// (eg profiles/[PROFILE]/peers.json)
     /// Every second, each address present in this set will be sent a request
     /// to connect.
     async fn start_monitor_status(&self) -> Result<JoinHandle<()>, Error> {
@@ -383,10 +388,15 @@ impl NetworkController {
         let outgoing = self.outgoing.clone();
         let incoming = self.incoming.clone();
         let interval = self.config.peer_file_dump_interval.try_into().unwrap();
-        let d2 = self.config.d2_file.clone();
+        let profile_path = Path::new(&self.config.target.file)
+            .parent()
+            .unwrap()
+            .to_owned();
+        let d2 = self.config.d2;
         let handle = tokio::spawn(async move {
             let mut interval = time::interval(Duration::from_secs(interval)); // Every second
             loop {
+                let mut path = profile_path.clone();
                 // We wait for the periodic tick,
                 interval.tick().await;
 
@@ -426,27 +436,29 @@ impl NetworkController {
                 addrs.append(&mut in_addrs);
 
                 let addrs_str = serde_json::to_string_pretty(&addrs).unwrap();
-                let working_dir = get_working_dir();
-                let mut path = PathBuf::from(&working_dir);
                 path.push("peers.json");
                 let mut file = File::create(&path).await.expect("create peers.json");
                 file.write_all(addrs_str.as_bytes())
                     .await
                     .expect("write to peers.json");
 
-                if let Some(ref file) = d2 {
+                log::info!("D2: {:?}", d2);
+                if d2.unwrap_or_default() {
                     let summary = Summary {
                         controller,
                         incoming,
                         outgoing,
                     };
 
-                    let output = serde_json::to_string(&summary).unwrap();
+                    path.pop(); // remove 'peers.json'
+                    path.push("peers.d2");
 
-                    let mut path = PathBuf::from(&working_dir);
-                    path.push(file);
-                    let mut file = File::create(&path).await.expect("create d2 file");
-                    file.write_all(output.as_bytes()).await.expect("write d2");
+                    log::info!("D2 path: {}", path.display());
+                    task::spawn_blocking(move || {
+                        summary.save_d2(&path).expect("save d2 file");
+                    })
+                    .await
+                    .expect("d2 thread");
                 }
             }
         });
@@ -1072,8 +1084,8 @@ pub struct Controller {
     pub target: Target,
     /// Period, in seconds, for dumping peer file.
     pub peer_file_dump_interval: i32,
-    /// d2 output file
-    pub d2_file: Option<String>,
+    /// whether or not we output a d2 file
+    pub d2: Option<bool>,
 }
 
 /// Configuration for the network controller. Incoming section
@@ -1135,4 +1147,48 @@ pub struct Summary {
     pub incoming: Vec<InConnInfo>,
     /// outgoing
     pub outgoing: Vec<OutConnInfo>,
+}
+
+impl Summary {
+    fn save_d2<P: AsRef<Path>>(&self, filename: &P) -> Result<(), Error> {
+        let mut buf = String::new();
+        // First write the block identifiers
+        writeln!(
+            buf,
+            r"{}: {} \n ({})",
+            self.controller.id,
+            self.controller.label,
+            self.controller.addr.port()
+        )
+        .unwrap();
+
+        self.incoming.iter().for_each(|i| {
+            writeln!(buf, r"{}: {} \n ({})", i.id, i.label, i.addr.port()).unwrap();
+        });
+
+        self.outgoing.iter().for_each(|o| {
+            writeln!(buf, r"{}: {} \n ({})", o.id, o.label, o.addr.port()).unwrap();
+        });
+
+        // Then write connections
+
+        self.incoming.iter().for_each(|i| {
+            writeln!(buf, r"{} -> {}", i.id, self.controller.id).unwrap();
+        });
+
+        self.outgoing.iter().for_each(|o| {
+            writeln!(buf, r"{} -> {}: {}", self.controller.id, o.id, o.rtt).unwrap();
+        });
+
+        let mut file = std::fs::File::create(filename).map_err(|err| Error::IO {
+            source: err,
+            detail: "Could not create d2 file".to_owned(),
+        })?;
+
+        file.write_all(buf.as_bytes()).map_err(|err| Error::IO {
+            source: err,
+            detail: "Could not write d2 file".to_owned(),
+        })?;
+        Ok(())
+    }
 }

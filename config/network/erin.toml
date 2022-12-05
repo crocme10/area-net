@@ -4,4 +4,4 @@ label = "erin"
 port = 8105
 
 [network.controller.target]
-file = "profiles/erin.json"
+file = "profiles/erin/erin.json"

@@ -1,2 +1,5 @@
 target/
 peers.json
+/profiles/**/*.d2
+/profiles/**/*.svg
+/profile/**/peers.json

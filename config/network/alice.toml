@@ -4,4 +4,4 @@ label = "alice"
 port = 8090
 
 [network.controller.target]
-file = "profiles/alice.json"
+file = "profiles/alice/alice.json"
