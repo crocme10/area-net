@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use super::command::Command;
 use super::event::Event;
-use crate::decoder;
+use crate::codec;
 use crate::message::{
     self, ConnRequest, ConnResponse, ContactRequest, ContactResponse, HeartbeatRequest,
     HeartbeatResponse, Message,
@@ -952,7 +952,7 @@ pub enum Error {
     /// Codec Error
     Codec {
         /// Just the source
-        source: decoder::Error,
+        source: codec::Error,
     },
 
     /// Message Error
