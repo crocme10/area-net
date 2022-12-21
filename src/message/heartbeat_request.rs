@@ -57,9 +57,9 @@ impl HeartbeatRequest {
     pub fn into_frame(self) -> Result<Frame, Error> {
         let HeartbeatRequest { id, label, src } = self;
         let mut frame = Frame::array();
-        frame.push_simple(String::from("HBT_REQ"))?;
-        frame.push_simple(id)?;
-        frame.push_simple(label)?;
+        frame.push_string(String::from("HBT_REQ"))?;
+        frame.push_string(id)?;
+        frame.push_string(label)?;
         frame.push_integer(src)?;
         Ok(frame)
     }

@@ -51,10 +51,10 @@ impl ConnRequest {
     pub fn into_frame(self) -> Result<Frame, Error> {
         let ConnRequest { id, label, address } = self;
         let mut frame = Frame::array();
-        frame.push_simple(String::from("CONN_REQ"))?;
-        frame.push_simple(id)?;
-        frame.push_simple(label)?;
-        frame.push_simple(address)?;
+        frame.push_string(String::from("CONN_REQ"))?;
+        frame.push_string(id)?;
+        frame.push_string(label)?;
+        frame.push_string(address)?;
         Ok(frame)
     }
 }

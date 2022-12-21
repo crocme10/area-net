@@ -1,6 +1,5 @@
-//! Provides a type representing a Redis protocol frame as well as utilities for
-//! parsing frames from a byte array.
-//!
+//! This is based on mini-redis
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::convert::TryInto;
 use std::fmt;
@@ -12,15 +11,13 @@ use tokio::io::AsyncWriteExt;
 #[derive(Clone, Debug)]
 pub enum Frame {
     /// Just a string
-    Simple(String),
+    String(String),
     /// An error
     Error(String),
-    /// An integer
-    // FIXME Naming of frames should probably
-    // be something like Int and UInt
-    Integer(u64),
-    /// Timestamp (μs)
-    Timestamp(i64),
+    /// An unsigned integer
+    UInt(u64),
+    /// A signed integer
+    Int(i64),
     /// Raw bytes
     Bulk(Bytes),
     /// Empty frame
@@ -66,10 +63,10 @@ impl Frame {
     }
 
     /// push simple
-    pub(crate) fn push_simple(&mut self, s: String) -> Result<(), Error> {
+    pub(crate) fn push_string(&mut self, s: String) -> Result<(), Error> {
         match self {
             Frame::Array(vec) => {
-                vec.push(Frame::Simple(s));
+                vec.push(Frame::String(s));
                 Ok(())
             }
             _ => Err(Error::InvalidFrameType {
@@ -82,7 +79,7 @@ impl Frame {
     pub(crate) fn push_integer(&mut self, i: i64) -> Result<(), Error> {
         match self {
             Frame::Array(vec) => {
-                vec.push(Frame::Timestamp(i));
+                vec.push(Frame::Int(i));
                 Ok(())
             }
             _ => Err(Error::InvalidFrameType {
@@ -91,11 +88,11 @@ impl Frame {
         }
     }
 
-    /// push integer
+    /// push unsigned integer
     pub(crate) fn push_unsigned(&mut self, u: u64) -> Result<(), Error> {
         match self {
             Frame::Array(vec) => {
-                vec.push(Frame::Integer(u));
+                vec.push(Frame::UInt(u));
                 Ok(())
             }
             _ => Err(Error::InvalidFrameType {
@@ -146,7 +143,7 @@ impl Frame {
                     String::from_utf8(line[..].to_vec()).map_err(|err| Error::UnexpectedBytes {
                         detail: format!("Invalid UTF8: {err}"),
                     })?;
-                Ok(Frame::Simple(string))
+                Ok(Frame::String(string))
             }
             b'-' => {
                 let line = get_line(src)?;
@@ -158,11 +155,11 @@ impl Frame {
             }
             b':' => {
                 let len = get_unsigned(src)?;
-                Ok(Frame::Integer(len))
+                Ok(Frame::UInt(len))
             }
             b'@' => {
                 let ts = get_integer(src)?;
-                Ok(Frame::Timestamp(ts))
+                Ok(Frame::Int(ts))
             }
             b'*' => {
                 let len: usize = get_unsigned(src)?.try_into()?;
@@ -216,7 +213,7 @@ impl Frame {
         T: Unpin,
     {
         match self {
-            Frame::Simple(val) => {
+            Frame::String(val) => {
                 dst.write_u8(b'+').await?;
                 dst.write_all(val.as_bytes()).await?;
                 dst.write_all(b"\r\n").await?;
@@ -226,11 +223,11 @@ impl Frame {
                 dst.write_all(val.as_bytes()).await?;
                 dst.write_all(b"\r\n").await?;
             }
-            Frame::Integer(val) => {
+            Frame::UInt(val) => {
                 dst.write_u8(b':').await?;
                 write_unsigned(dst, *val).await?;
             }
-            Frame::Timestamp(val) => {
+            Frame::Int(val) => {
                 dst.write_u8(b'@').await?;
                 write_integer(dst, *val).await?;
             }
@@ -285,7 +282,7 @@ impl Frame {
     /// Write a frame literal to the file
     async fn write_value_buf(&self, dst: &mut BytesMut) -> Result<(), Error> {
         match self {
-            Frame::Simple(val) => {
+            Frame::String(val) => {
                 dst.put_u8(b'+');
                 unsafe {
                     dst.advance_mut(1);
@@ -304,11 +301,11 @@ impl Frame {
                 dst.put(val.as_bytes());
                 dst.put(&b"\r\n"[..]);
             }
-            Frame::Integer(val) => {
+            Frame::UInt(val) => {
                 dst.put_u8(b':');
                 write_unsigned_buf(dst, *val).await?;
             }
-            Frame::Timestamp(val) => {
+            Frame::Int(val) => {
                 dst.put_u8(b'@');
                 write_integer_buf(dst, *val).await?;
             }

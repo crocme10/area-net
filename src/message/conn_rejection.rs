@@ -44,9 +44,9 @@ impl ConnRejection {
     /// Convert the Connection Rejection into a frame
     pub fn into_frame(self) -> Result<Frame, Error> {
         let mut frame = Frame::array();
-        frame.push_simple(String::from("CONN_REJECT"))?;
-        frame.push_simple(self.id)?;
-        frame.push_simple(self.reason)?;
+        frame.push_string(String::from("CONN_REJECT"))?;
+        frame.push_string(self.id)?;
+        frame.push_string(self.reason)?;
         Ok(frame)
     }
 }

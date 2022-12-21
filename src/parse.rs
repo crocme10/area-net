@@ -49,7 +49,7 @@ impl Parse {
     /// Return the string contained in the Frame::Simple
     pub fn next_string(&mut self) -> Result<String, Error> {
         match self.next_frame()? {
-            Frame::Simple(s) => Ok(s),
+            Frame::String(s) => Ok(s),
             frame => Err(Error::InvalidFrameType {
                 detail: format!("Expected Simple Frame, got {frame:?}"),
             }),
@@ -59,7 +59,7 @@ impl Parse {
     /// Return the integer contained in the Frame::Timestamp
     pub fn next_integer(&mut self) -> Result<i64, Error> {
         match self.next_frame()? {
-            Frame::Timestamp(i) => Ok(i),
+            Frame::Int(i) => Ok(i),
             frame => Err(Error::InvalidFrameType {
                 detail: format!("Expected Timestamp Frame, got {frame:?}"),
             }),
@@ -69,7 +69,7 @@ impl Parse {
     /// Return the unsigned contained in the Frame::Integer
     pub fn next_unsigned(&mut self) -> Result<u64, Error> {
         match self.next_frame()? {
-            Frame::Integer(u) => Ok(u),
+            Frame::UInt(u) => Ok(u),
             frame => Err(Error::InvalidFrameType {
                 detail: format!("Expected Integer Frame, got {frame:?}"),
             }),

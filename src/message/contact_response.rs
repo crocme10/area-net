@@ -41,10 +41,10 @@ impl ContactResponse {
     pub fn into_frame(self) -> Result<Frame, Error> {
         let ContactResponse { addrs } = self;
         let mut frame = Frame::array();
-        frame.push_simple(String::from("CTCT_RESP"))?;
+        frame.push_string(String::from("CTCT_RESP"))?;
         frame.push_unsigned(addrs.len().try_into().unwrap())?;
         addrs.into_iter().for_each(|addr| {
-            frame.push_simple(addr).unwrap();
+            frame.push_string(addr).unwrap();
         });
         Ok(frame)
     }

@@ -94,10 +94,10 @@ impl Encoder<Frame> for FrameCodec {
 /// Return the length of the frame
 fn frame_len(frame: &Frame) -> usize {
     match frame {
-        Frame::Simple(val) => 3 + val.as_bytes().len(),
+        Frame::String(val) => 3 + val.as_bytes().len(),
         Frame::Error(val) => 3 + val.as_bytes().len(),
-        Frame::Integer(_) => 11,
-        Frame::Timestamp(_) => 11,
+        Frame::UInt(_) => 11,
+        Frame::Int(_) => 11,
         Frame::Null => 5,
         Frame::Bulk(val) => 11 + val.len(),
         Frame::Array(frames) => frames.iter().fold(11, |acc, f| acc + frame_len(f)),
@@ -107,7 +107,7 @@ fn frame_len(frame: &Frame) -> usize {
 /// Write a frame literal to the file
 fn write_frame(frame: &Frame, dst: &mut BytesMut) -> Result<(), Error> {
     match frame {
-        Frame::Simple(val) => {
+        Frame::String(val) => {
             let bytes = val.as_bytes();
             dst.reserve(1 + bytes.len() + 2); // '+' + bytes + '\r' + '\n'
             dst.put_u8(b'+');
@@ -121,12 +121,12 @@ fn write_frame(frame: &Frame, dst: &mut BytesMut) -> Result<(), Error> {
             dst.put(bytes);
             dst.put(&b"\r\n"[..]);
         }
-        Frame::Integer(val) => {
+        Frame::UInt(val) => {
             dst.reserve(11); // ':' + u64 + '\r' + '\n'
             dst.put_u8(b':');
             write_u64(*val, dst)?;
         }
-        Frame::Timestamp(val) => {
+        Frame::Int(val) => {
             dst.reserve(11); // ':' + u64 + '\r' + '\n'
             dst.put_u8(b'@');
             write_i64(*val, dst)?;

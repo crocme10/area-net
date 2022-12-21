@@ -40,9 +40,9 @@ impl ConnResponse {
     pub fn into_frame(self) -> Result<Frame, Error> {
         let ConnResponse { id, label } = self;
         let mut frame = Frame::array();
-        frame.push_simple(String::from("CONN_RESP"))?;
-        frame.push_simple(id)?;
-        frame.push_simple(label)?;
+        frame.push_string(String::from("CONN_RESP"))?;
+        frame.push_string(id)?;
+        frame.push_string(label)?;
         Ok(frame)
     }
 }

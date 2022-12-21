@@ -18,7 +18,7 @@ impl ContactRequest {
     pub fn into_frame(self) -> Result<Frame, Error> {
         let ContactRequest = self;
         let mut frame = Frame::array();
-        frame.push_simple(String::from("CTCT_REQ"))?;
+        frame.push_string(String::from("CTCT_REQ"))?;
         Ok(frame)
     }
 }

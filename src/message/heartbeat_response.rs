@@ -75,9 +75,9 @@ impl HeartbeatResponse {
             dst,
         } = self;
         let mut frame = Frame::array();
-        frame.push_simple(String::from("HBT_RESP"))?;
-        frame.push_simple(id)?;
-        frame.push_simple(label)?;
+        frame.push_string(String::from("HBT_RESP"))?;
+        frame.push_string(id)?;
+        frame.push_string(label)?;
         frame.push_integer(src)?;
         frame.push_integer(dst)?;
         Ok(frame)
