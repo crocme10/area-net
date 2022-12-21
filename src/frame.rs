@@ -1,6 +1,8 @@
 //! This is based on mini-redis
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use async_recursion::async_recursion;
+use bytes::{Buf, Bytes};
+use futures::stream::{self, TryStreamExt};
 use std::convert::TryInto;
 use std::fmt;
 use std::io::Cursor;
@@ -101,6 +103,19 @@ impl Frame {
         }
     }
 
+    /// push a frame
+    pub(crate) fn push_frame(&mut self, f: Frame) -> Result<(), Error> {
+        match self {
+            Frame::Array(vec) => {
+                vec.push(f);
+                Ok(())
+            }
+            _ => Err(Error::InvalidFrameType {
+                detail: String::from("Expected Frame Type Array"),
+            }),
+        }
+    }
+
     /// Checks if an entire message can be decoded from `src`
     pub fn check(src: &mut Cursor<&[u8]>) -> Result<(), Error> {
         // We already checked src.has_remaining(), so the get_u8() won't panic.
@@ -174,14 +189,12 @@ impl Frame {
     }
 
     /// Documentation
-    pub async fn write<T: AsyncWriteExt>(&self, dst: &mut T) -> Result<(), Error>
+    pub async fn write<T>(&self, dst: &mut T) -> Result<(), Error>
     where
-        T: AsyncWriteExt,
-        T: Unpin,
+        T: AsyncWriteExt + Unpin + Send,
     {
         // Arrays are encoded by encoding each entry. All other frame types are
-        // considered literals. For now, mini-redis is not able to encode
-        // recursive frame structures. See below for more details.
+        // considered literals.
         match self {
             Frame::Array(val) => {
                 // Encode the frame type prefix. For an array, it is `*`.
@@ -207,10 +220,10 @@ impl Frame {
     }
 
     /// Write a frame literal to the file
-    async fn write_value<T: AsyncWriteExt>(&self, dst: &mut T) -> Result<(), Error>
+    #[async_recursion]
+    async fn write_value<T>(&self, dst: &mut T) -> Result<(), Error>
     where
-        T: AsyncWriteExt,
-        T: Unpin,
+        T: AsyncWriteExt + Unpin + Send,
     {
         match self {
             Frame::String(val) => {
@@ -242,89 +255,18 @@ impl Frame {
                 dst.write_all(val).await?;
                 dst.write_all(b"\r\n").await?;
             }
-            // Encoding an `Array` from within a value cannot be done using a
-            // recursive strategy. In general, async fns do not support
-            // recursion. Mini-redis has not needed to encode nested arrays yet,
-            // so for now it is skipped.
-            Frame::Array(_val) => unreachable!(),
-        }
-
-        Ok(())
-    }
-
-    /// Documentation
-    pub async fn write_buf(&self, dst: &mut BytesMut) -> Result<(), Error> {
-        // Arrays are encoded by encoding each entry. All other frame types are
-        // considered literals. For now, mini-redis is not able to encode
-        // recursive frame structures. See below for more details.
-        match self {
             Frame::Array(val) => {
-                // Encode the frame type prefix. For an array, it is `*`.
-                dst.put_u8(b'*');
-
-                // Encode the length of the array.
-                write_unsigned_buf(dst, val.len() as u64).await?;
-
-                // Iterate and encode each entry in the array.
-                for entry in &**val {
-                    entry.write_value_buf(dst).await?;
-                }
-            }
-            // The frame type is a literal. Encode the value directly.
-            _ => {
-                self.write_value_buf(dst).await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Write a frame literal to the file
-    async fn write_value_buf(&self, dst: &mut BytesMut) -> Result<(), Error> {
-        match self {
-            Frame::String(val) => {
-                dst.put_u8(b'+');
-                unsafe {
-                    dst.advance_mut(1);
-                };
-                dst.put(val.as_bytes());
-                unsafe {
-                    dst.advance_mut(val.as_bytes().len());
-                };
-                dst.put(&b"\r\n"[..]);
-                unsafe {
-                    dst.advance_mut(2);
-                };
-            }
-            Frame::Error(val) => {
-                dst.put_u8(b'-');
-                dst.put(val.as_bytes());
-                dst.put(&b"\r\n"[..]);
-            }
-            Frame::UInt(val) => {
-                dst.put_u8(b':');
-                write_unsigned_buf(dst, *val).await?;
-            }
-            Frame::Int(val) => {
-                dst.put_u8(b'@');
-                write_integer_buf(dst, *val).await?;
-            }
-            Frame::Null => {
-                dst.put(&b"$-1\r\n"[..]);
-            }
-            Frame::Bulk(val) => {
                 let len = val.len();
-
-                dst.put_u8(b'$');
-                write_unsigned_buf(dst, len as u64).await?;
-                dst.put(val.as_ref());
-                dst.put(&b"\r\n"[..]);
+                dst.write_u8(b'*').await?;
+                write_unsigned(dst, len as u64).await?;
+                let dst = stream::iter(val.iter().map(|f| Ok::<_, Error>(f)))
+                    .try_fold(dst, |buff, frame| async move {
+                        frame.write_value(buff).await?;
+                        Ok(buff)
+                    })
+                    .await?;
+                dst.write_all(b"\r\n").await?;
             }
-            // Encoding an `Array` from within a value cannot be done using a
-            // recursive strategy. In general, async fns do not support
-            // recursion. Mini-redis has not needed to encode nested arrays yet,
-            // so for now it is skipped.
-            Frame::Array(_val) => unreachable!(),
         }
 
         Ok(())
@@ -351,22 +293,6 @@ where
     Ok(())
 }
 
-/// Write a unsigned frame to the file
-async fn write_unsigned_buf(dst: &mut BytesMut, val: u64) -> Result<(), Error> {
-    use std::io::Write;
-
-    // Convert the value to a string
-    let mut buf = [0u8; 20];
-    let mut buf = Cursor::new(&mut buf[..]);
-    write!(&mut buf, "{}", val)?;
-
-    let pos = buf.position() as usize;
-    dst.put(&buf.get_ref()[..pos]);
-    dst.put(&b"\r\n"[..]);
-
-    Ok(())
-}
-
 /// Write an integer frame to the file
 async fn write_integer<T>(dst: &mut T, val: i64) -> Result<(), Error>
 where
@@ -383,22 +309,6 @@ where
     let pos = buf.position() as usize;
     dst.write_all(&buf.get_ref()[..pos]).await?;
     dst.write_all(b"\r\n").await?;
-
-    Ok(())
-}
-
-/// Write an integer frame to the file
-async fn write_integer_buf(dst: &mut BytesMut, val: i64) -> Result<(), Error> {
-    use std::io::Write;
-
-    // Convert the value to a string
-    let mut buf = [0u8; 20];
-    let mut buf = Cursor::new(&mut buf[..]);
-    write!(&mut buf, "{}", val)?;
-
-    let pos = buf.position() as usize;
-    dst.put(&buf.get_ref()[..pos]);
-    dst.put(&b"\r\n"[..]);
 
     Ok(())
 }
@@ -477,6 +387,7 @@ impl From<std::io::Error> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::BufWriter;
 
     #[test]
     fn get_line_works() {
@@ -497,7 +408,6 @@ mod tests {
     fn get_line_works_with_end_of_frame_at_end_of_buffer() {
         let mut b = Cursor::new(&b"Hello World\r\n"[..]);
         let a = get_line(&mut b).unwrap();
-        // assert_eq!(b.get_ref(), b"");
         assert_eq!(&b.get_ref()[b.position() as usize..], b"");
         assert_eq!(&a, b"Hello World");
     }
@@ -508,5 +418,112 @@ mod tests {
         let a = get_line(&mut b).unwrap();
         assert_eq!(&b.get_ref()[b.position() as usize..], b"");
         assert_eq!(&a, b"");
+    }
+
+    #[tokio::test]
+    async fn should_encode_decode_a_string() {
+        let frame = Frame::String("Hello World!".to_owned());
+        let mut buf = BufWriter::new(Vec::new());
+        frame.write(&mut buf).await.unwrap();
+        let inner = buf.into_inner();
+        let mut cur = Cursor::new(inner.as_slice());
+        let new_frame = Frame::parse(&mut cur).unwrap();
+        match new_frame {
+            Frame::String(s) => assert_eq!(s, "Hello World!"),
+            _ => panic!("Expected a Frame::String"),
+        }
+    }
+
+    #[tokio::test]
+    async fn should_encode_decode_an_integer() {
+        let frame = Frame::Int(-36);
+        let mut buf = BufWriter::new(Vec::new());
+        frame.write(&mut buf).await.unwrap();
+        let inner = buf.into_inner();
+        let mut cur = Cursor::new(inner.as_slice());
+        let new_frame = Frame::parse(&mut cur).unwrap();
+        match new_frame {
+            Frame::Int(i) => assert_eq!(i, -36),
+            _ => panic!("Expected a Frame::Int"),
+        }
+    }
+
+    #[tokio::test]
+    async fn should_encode_decode_an_unsigned_integer() {
+        let frame = Frame::UInt(36);
+        let mut buf = BufWriter::new(Vec::new());
+        frame.write(&mut buf).await.unwrap();
+        let inner = buf.into_inner();
+        let mut cur = Cursor::new(inner.as_slice());
+        let new_frame = Frame::parse(&mut cur).unwrap();
+        match new_frame {
+            Frame::UInt(i) => assert_eq!(i, 36),
+            _ => panic!("Expected a Frame::UInt"),
+        }
+    }
+
+    #[tokio::test]
+    async fn should_encode_decode_an_array() {
+        let mut frame = Frame::array();
+        frame.push_integer(42).unwrap();
+        frame.push_string("Hello World!".to_owned()).unwrap();
+        let mut buf = BufWriter::new(Vec::new());
+        frame.write(&mut buf).await.unwrap();
+        let inner = buf.into_inner();
+        let mut cur = Cursor::new(inner.as_slice());
+        let new_frame = Frame::parse(&mut cur).unwrap();
+        match new_frame {
+            Frame::Array(a) => {
+                assert_eq!(a.len(), 2);
+                match a[0] {
+                    Frame::Int(i) => assert_eq!(i, 42),
+                    _ => panic!("Expected a Frame::Int inside Frame::Array"),
+                }
+                match &a[1] {
+                    Frame::String(s) => assert_eq!(s, "Hello World!"),
+                    _ => panic!("Expected a Frame::String inside Frame::Array"),
+                }
+            }
+            _ => panic!("Expected a Frame::Array"),
+        }
+    }
+
+    #[tokio::test]
+    async fn should_encode_decode_a_recursive_array() {
+        let mut inner_frame = Frame::array();
+        inner_frame.push_integer(42).unwrap();
+        inner_frame.push_string("Inner String".to_owned()).unwrap();
+        let mut frame = Frame::array();
+        frame.push_string("Outer String".to_owned()).unwrap();
+        frame.push_frame(inner_frame).unwrap();
+        let mut buf = BufWriter::new(Vec::new());
+        frame.write(&mut buf).await.unwrap();
+        let inner = buf.into_inner();
+        let mut cur = Cursor::new(inner.as_slice());
+        let new_frame = Frame::parse(&mut cur).unwrap();
+        match new_frame {
+            Frame::Array(a) => {
+                assert_eq!(a.len(), 2);
+                match &a[0] {
+                    Frame::String(s) => assert_eq!(s, "Outer String"),
+                    _ => panic!("Expected a Frame::Int inside Frame::Array"),
+                }
+                match &a[1] {
+                    Frame::Array(b) => {
+                        assert_eq!(b.len(), 2);
+                        match b[0] {
+                            Frame::Int(i) => assert_eq!(i, 42),
+                            _ => panic!("Expected a Frame::Int inside Frame::Array"),
+                        }
+                        match &b[1] {
+                            Frame::String(s) => assert_eq!(s, "Inner String"),
+                            _ => panic!("Expected a Frame::String inside Frame::Array"),
+                        }
+                    }
+                    _ => panic!("Expected a Frame::Array"),
+                }
+            }
+            _ => panic!("Expected a Frame::Array"),
+        }
     }
 }
