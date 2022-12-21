@@ -1,13 +1,10 @@
 //! This is based on mini-redis
 
-use async_recursion::async_recursion;
-use bytes::{Buf, Bytes};
-use futures::stream::{self, TryStreamExt};
+use bytes::{Buf, Bytes, BytesMut};
 use std::convert::TryInto;
 use std::fmt;
 use std::io::Cursor;
 use std::num::TryFromIntError;
-use tokio::io::AsyncWriteExt;
 
 /// A frame in the kv protocol
 #[derive(Clone, Debug)]
@@ -62,6 +59,19 @@ impl Frame {
     /// Returns an empty array
     pub(crate) fn array() -> Frame {
         Frame::Array(vec![])
+    }
+
+    /// Returns the number of bytes this frame requires
+    pub fn bytes_count(&self) -> usize {
+        match self {
+            Frame::String(val) => 3 + val.as_bytes().len(),
+            Frame::Error(val) => 3 + val.as_bytes().len(),
+            Frame::UInt(_) => 11,
+            Frame::Int(_) => 11,
+            Frame::Null => 5,
+            Frame::Bulk(val) => 11 + val.len(),
+            Frame::Array(frames) => frames.iter().fold(11, |acc, f| acc + f.bytes_count()),
+        }
     }
 
     /// push simple
@@ -189,83 +199,70 @@ impl Frame {
     }
 
     /// Documentation
-    pub async fn write<T>(&self, dst: &mut T) -> Result<(), Error>
-    where
-        T: AsyncWriteExt + Unpin + Send,
-    {
+    pub fn write(&self, dst: &mut BytesMut) -> Result<(), Error> {
         // Arrays are encoded by encoding each entry. All other frame types are
         // considered literals.
         match self {
             Frame::Array(val) => {
                 // Encode the frame type prefix. For an array, it is `*`.
-                dst.write_u8(b'*').await?;
+                dst.extend_from_slice(b"*");
 
                 // Encode the length of the array.
-                write_unsigned(dst, val.len() as u64).await?;
+                write_unsigned(dst, val.len() as u64)?;
 
                 // Iterate and encode each entry in the array.
                 for entry in &**val {
-                    entry.write_value(dst).await?;
+                    entry.write_value(dst)?;
                 }
             }
             // The frame type is a literal. Encode the value directly.
-            _ => self.write_value(dst).await?,
+            _ => self.write_value(dst)?,
         }
 
-        // Ensure the encoded frame is written to the socket. The calls above
-        // are to the buffered file and writes. Calling `flush` writes the
-        // remaining contents of the buffer to the socket.
-        dst.flush().await?;
         Ok(())
     }
 
     /// Write a frame literal to the file
-    #[async_recursion]
-    async fn write_value<T>(&self, dst: &mut T) -> Result<(), Error>
-    where
-        T: AsyncWriteExt + Unpin + Send,
-    {
+    fn write_value(&self, dst: &mut BytesMut) -> Result<(), Error> {
         match self {
             Frame::String(val) => {
-                dst.write_u8(b'+').await?;
-                dst.write_all(val.as_bytes()).await?;
-                dst.write_all(b"\r\n").await?;
+                dst.extend_from_slice(b"+");
+                dst.extend_from_slice(val.as_bytes());
+                dst.extend_from_slice(b"\r\n");
             }
             Frame::Error(val) => {
-                dst.write_u8(b'-').await?;
-                dst.write_all(val.as_bytes()).await?;
-                dst.write_all(b"\r\n").await?;
+                dst.extend_from_slice(b"-");
+                dst.extend_from_slice(val.as_bytes());
+                dst.extend_from_slice(b"\r\n");
             }
             Frame::UInt(val) => {
-                dst.write_u8(b':').await?;
-                write_unsigned(dst, *val).await?;
+                dst.extend_from_slice(b":");
+                write_unsigned(dst, *val)?;
             }
             Frame::Int(val) => {
-                dst.write_u8(b'@').await?;
-                write_integer(dst, *val).await?;
+                dst.extend_from_slice(b"@");
+                write_integer(dst, *val)?;
             }
             Frame::Null => {
-                dst.write_all(b"$-1\r\n").await?;
+                dst.extend_from_slice(b"$-1\r\n");
             }
             Frame::Bulk(val) => {
                 let len = val.len();
 
-                dst.write_u8(b'$').await?;
-                write_unsigned(dst, len as u64).await?;
-                dst.write_all(val).await?;
-                dst.write_all(b"\r\n").await?;
+                dst.extend_from_slice(b"$");
+                write_unsigned(dst, len as u64)?;
+                dst.extend_from_slice(val);
+                dst.extend_from_slice(b"\r\n");
             }
             Frame::Array(val) => {
                 let len = val.len();
-                dst.write_u8(b'*').await?;
-                write_unsigned(dst, len as u64).await?;
-                let dst = stream::iter(val.iter().map(|f| Ok::<_, Error>(f)))
-                    .try_fold(dst, |buff, frame| async move {
-                        frame.write_value(buff).await?;
-                        Ok(buff)
-                    })
-                    .await?;
-                dst.write_all(b"\r\n").await?;
+                dst.extend_from_slice(b"*");
+                write_unsigned(dst, len as u64)?;
+                let dst = val.iter().try_fold(dst, |buff, frame| {
+                    frame.write_value(buff)?;
+                    Ok::<_, Error>(buff)
+                })?;
+                dst.extend_from_slice(b"\r\n");
             }
         }
 
@@ -274,11 +271,7 @@ impl Frame {
 }
 
 /// Write a unsigned frame to the file
-async fn write_unsigned<T>(dst: &mut T, val: u64) -> Result<(), Error>
-where
-    T: AsyncWriteExt,
-    T: Unpin,
-{
+fn write_unsigned(dst: &mut BytesMut, val: u64) -> Result<(), Error> {
     use std::io::Write;
 
     // Convert the value to a string
@@ -287,18 +280,14 @@ where
     write!(&mut buf, "{}", val)?;
 
     let pos = buf.position() as usize;
-    dst.write_all(&buf.get_ref()[..pos]).await?;
-    dst.write_all(b"\r\n").await?;
+    dst.extend_from_slice(&buf.get_ref()[..pos]);
+    dst.extend_from_slice(b"\r\n");
 
     Ok(())
 }
 
 /// Write an integer frame to the file
-async fn write_integer<T>(dst: &mut T, val: i64) -> Result<(), Error>
-where
-    T: AsyncWriteExt,
-    T: Unpin,
-{
+fn write_integer(dst: &mut BytesMut, val: i64) -> Result<(), Error> {
     use std::io::Write;
 
     // Convert the value to a string
@@ -307,8 +296,8 @@ where
     write!(&mut buf, "{}", val)?;
 
     let pos = buf.position() as usize;
-    dst.write_all(&buf.get_ref()[..pos]).await?;
-    dst.write_all(b"\r\n").await?;
+    dst.extend_from_slice(&buf.get_ref()[..pos]);
+    dst.extend_from_slice(b"\r\n");
 
     Ok(())
 }
@@ -387,7 +376,6 @@ impl From<std::io::Error> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::BufWriter;
 
     #[test]
     fn get_line_works() {
@@ -420,13 +408,12 @@ mod tests {
         assert_eq!(&a, b"");
     }
 
-    #[tokio::test]
-    async fn should_encode_decode_a_string() {
+    #[test]
+    fn should_encode_decode_a_string() {
         let frame = Frame::String("Hello World!".to_owned());
-        let mut buf = BufWriter::new(Vec::new());
-        frame.write(&mut buf).await.unwrap();
-        let inner = buf.into_inner();
-        let mut cur = Cursor::new(inner.as_slice());
+        let mut bytes = BytesMut::new();
+        frame.write(&mut bytes).unwrap();
+        let mut cur = Cursor::new(&bytes[..]);
         let new_frame = Frame::parse(&mut cur).unwrap();
         match new_frame {
             Frame::String(s) => assert_eq!(s, "Hello World!"),
@@ -437,10 +424,9 @@ mod tests {
     #[tokio::test]
     async fn should_encode_decode_an_integer() {
         let frame = Frame::Int(-36);
-        let mut buf = BufWriter::new(Vec::new());
-        frame.write(&mut buf).await.unwrap();
-        let inner = buf.into_inner();
-        let mut cur = Cursor::new(inner.as_slice());
+        let mut bytes = BytesMut::new();
+        frame.write(&mut bytes).unwrap();
+        let mut cur = Cursor::new(&bytes[..]);
         let new_frame = Frame::parse(&mut cur).unwrap();
         match new_frame {
             Frame::Int(i) => assert_eq!(i, -36),
@@ -451,10 +437,9 @@ mod tests {
     #[tokio::test]
     async fn should_encode_decode_an_unsigned_integer() {
         let frame = Frame::UInt(36);
-        let mut buf = BufWriter::new(Vec::new());
-        frame.write(&mut buf).await.unwrap();
-        let inner = buf.into_inner();
-        let mut cur = Cursor::new(inner.as_slice());
+        let mut bytes = BytesMut::new();
+        frame.write(&mut bytes).unwrap();
+        let mut cur = Cursor::new(&bytes[..]);
         let new_frame = Frame::parse(&mut cur).unwrap();
         match new_frame {
             Frame::UInt(i) => assert_eq!(i, 36),
@@ -467,10 +452,9 @@ mod tests {
         let mut frame = Frame::array();
         frame.push_integer(42).unwrap();
         frame.push_string("Hello World!".to_owned()).unwrap();
-        let mut buf = BufWriter::new(Vec::new());
-        frame.write(&mut buf).await.unwrap();
-        let inner = buf.into_inner();
-        let mut cur = Cursor::new(inner.as_slice());
+        let mut bytes = BytesMut::new();
+        frame.write(&mut bytes).unwrap();
+        let mut cur = Cursor::new(&bytes[..]);
         let new_frame = Frame::parse(&mut cur).unwrap();
         match new_frame {
             Frame::Array(a) => {
@@ -496,10 +480,9 @@ mod tests {
         let mut frame = Frame::array();
         frame.push_string("Outer String".to_owned()).unwrap();
         frame.push_frame(inner_frame).unwrap();
-        let mut buf = BufWriter::new(Vec::new());
-        frame.write(&mut buf).await.unwrap();
-        let inner = buf.into_inner();
-        let mut cur = Cursor::new(inner.as_slice());
+        let mut bytes = BytesMut::new();
+        frame.write(&mut bytes).unwrap();
+        let mut cur = Cursor::new(&bytes[..]);
         let new_frame = Frame::parse(&mut cur).unwrap();
         match new_frame {
             Frame::Array(a) => {
