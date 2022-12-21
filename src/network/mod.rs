@@ -10,5 +10,5 @@ pub mod peer;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Network {
     /// Network Controller Configuration
-    pub controller: controller::Controller,
+    pub controller: controller::Config,
 }

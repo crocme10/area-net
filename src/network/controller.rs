@@ -26,10 +26,11 @@ use super::command::Command;
 use super::event::Event;
 use super::peer::{self, Peer};
 
-/// Data used to track idle information:
+/// Data used to track idle information about an
+/// unknown connection target.
 #[derive(Debug, Clone)]
 pub struct AddrInfo {
-    /// Current list of addrs we need to connect to.
+    /// Network address we need to connect to.
     pub addr: SocketAddr,
     /// Number of time this address has been attempted.
     /// Maybe use AtomicI32 because its a counter
@@ -59,8 +60,7 @@ pub struct IdleState {
     pub addrs: HashSet<AddrInfo>,
 }
 
-/// Data used to track outgoing connections
-/// It includes a round trip time.
+/// Data used to track outbond connections
 #[derive(Debug, Clone, Serialize)]
 pub struct OutConnInfo {
     /// Address of the remote peer.
@@ -69,11 +69,14 @@ pub struct OutConnInfo {
     pub id: Uuid,
     /// Label of the remote peer.
     pub label: String,
-    /// Round trip time
+    /// Round trip time (μs)
+    /// This is the time the last heartbeat
+    /// exchange took.
+    /// (HeartbeatRequest and HeartbeatResponse)
     pub rtt: i64,
 }
 
-/// Data used to track idle information:
+/// Data used to track inbound connections
 #[derive(Debug, Clone, Serialize)]
 pub struct InConnInfo {
     /// Address of the remote peer.
@@ -87,9 +90,11 @@ pub struct InConnInfo {
 /// Network Controller State for outgoing connections.
 #[derive(Debug, Default)]
 pub struct OutgoingState {
-    /// Current list of peer ids attempting to connect
+    /// Current list of peer ids this network controller
+    /// is attempting to connect to.
     pub attempting: HashMap<Uuid, AddrInfo>,
-    /// Current list of peers connected.
+    /// Current list of peers this network controller
+    /// is connected to.
     pub connected: HashMap<Uuid, OutConnInfo>,
 }
 
@@ -126,10 +131,9 @@ pub struct NetworkController {
     /// Address node is listening to for incoming request
     pub addr: SocketAddr,
     /// configuration. It is not protected by a mutex because it is read only.
-    pub config: Arc<Controller>,
-    /// peers contains information about each peer to allow the controller
-    /// to communicate with the peer.
-    /// * a tx end of a channel, where the peer constantly listens on the rx end.
+    pub config: Arc<Config>,
+    /// This structure allows the controller to control each peer given its id:
+    /// * a tx end of a channel to communicate with the peer.
     /// * a handle to the peer main loop. It is just used to terminate the peer
     ///   by calling abort on the handle.
     pub peers: Arc<Mutex<PeerRepo>>,
@@ -158,7 +162,7 @@ pub struct NetworkController {
 
 impl NetworkController {
     /// Create a new network controller
-    pub fn new(label: String, config: Controller) -> Result<NetworkController, Error> {
+    pub fn new(label: String, config: Config) -> Result<NetworkController, Error> {
         let addr =
             IpAddr::from_str(config.listen.addr.as_str()).map_err(|err| Error::InvalidAddr {
                 source: err,
@@ -836,7 +840,7 @@ async fn send_listen(
     tx: &Sender<Command>,
     _incoming: Arc<Mutex<IncomingState>>,
     id: &Uuid,
-    _config: Arc<Controller>,
+    _config: Arc<Config>,
 ) -> Result<(), Error> {
     // We need to send a 'listen' command to 'id'.
     // We need to guard against too many incoming connections.
@@ -885,7 +889,7 @@ async fn listen(
     tx: Sender<Event>,
     peers: Arc<Mutex<PeerRepo>>,
     incoming: Arc<Mutex<IncomingState>>,
-    config: Arc<Controller>,
+    config: Arc<Config>,
 ) -> Result<(), Error> {
     let listener = match TcpListener::bind(&addr).await {
         Ok(listener) => listener,
@@ -1071,7 +1075,7 @@ pub fn get_working_dir() -> String {
 
 /// Configuration for the network controller
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Controller {
+pub struct Config {
     /// incoming section
     pub incoming: Incoming,
     /// outgoing section
